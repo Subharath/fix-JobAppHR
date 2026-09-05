@@ -88,6 +88,33 @@ StaticData.FastAPIUrl = app.Configuration["URL:FastAPIUrl"];
 
 app.UseHttpsRedirection();
 
+// Security Headers Middleware: Attached via OnStarting to guarantee execution across all responses (including 302 redirects & errors)
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        var headers = context.Response.Headers;
+        headers["X-Frame-Options"] = "DENY";
+        headers["X-XSS-Protection"] = "1; mode=block";
+        headers["X-Content-Type-Options"] = "nosniff";
+        headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        headers["Content-Security-Policy"] =
+            "default-src 'self'; " +
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+            "style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' data: https:; " +
+            "font-src 'self' data:; " +
+            "connect-src 'self' wss: ws:; " +
+            "object-src 'none'; " +
+            "frame-ancestors 'none'; " +
+            "form-action 'self' https://login.microsoftonline.com; " +
+            "base-uri 'self';";
+        return Task.CompletedTask;
+    });
+
+    await next();
+});
+
 app.UseStatusCodePages(async context => {
     if (context.HttpContext.Response.StatusCode == 404)
     {
@@ -109,15 +136,6 @@ app.UseCookiePolicy(
 new CookiePolicyOptions
 {
     Secure = app.Environment.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always
-});
-
-app.Use(async (context, next) =>
-{
-    context.Response.Headers.Add("X-Frame-Options", "DENY");
-    context.Response.Headers.Add("X-XSS-Protection", "1; mode=block");
-    context.Response.Headers.Add("X-Content-Type-Options", "nosniff");
-    //context.Response.Headers.Add("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'self'; frame-ancestors 'none'; img-src 'self'; form-action 'self'");
-    await next();
 });
 
 app.MapControllerRoute(
