@@ -1,4 +1,4 @@
-﻿// Please see documentation at https://docs.microsoft.com/aspnet/core/client-side/bundling-and-minification
+// Please see documentation at https://docs.microsoft.com/aspnet/core/client-side/bundling-and-minification
 // for details on configuring this project to bundle and minify static web assets.
 
 (function () {
@@ -354,5 +354,18 @@
 		});
 	} else {
 		attachThemeControls(theme);
+	}
+})();
+
+// CSP: let AJAX-loaded HTML fragments (jQuery .load) receive the nonce of the page that hosts them.
+(function () {
+	if (!window.jQuery) {
+		return;
+	}
+
+	const nonceScript = document.querySelector('script[nonce]');
+	const nonce = nonceScript ? (nonceScript.nonce || nonceScript.getAttribute('nonce')) : null;
+	if (nonce) {
+		window.jQuery.ajaxSetup({ headers: { 'X-CSP-Nonce': nonce } });
 	}
 })();

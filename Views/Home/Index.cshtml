@@ -1,4 +1,4 @@
-﻿@{
+@{
     ViewBag.Title = "Login";
     Layout = "~/Views/Shared/_LoginLayout.cshtml";
 }
@@ -19,10 +19,10 @@
         }
 
         <div class="login-actions">
-            <button class="btn btn-lg btn-primary" onclick="location.href='@Url.Action("AzureLogin", "Home")'">
+            <a class="btn btn-lg btn-primary" href="@Url.Action("AzureLogin", "Home")" role="button">
                 <i class="fa-brands fa-microsoft"></i>
                 Login with Azure
-            </button>
+            </a>
         </div>
     </div>
 </div>

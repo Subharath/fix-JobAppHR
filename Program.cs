@@ -2,6 +2,7 @@ using JobAppHR.Models;
 using JobAppHR.Repository;
 using JobAppHR.Services;
 using JobAppHR.Hubs;
+using JobAppHR.Security;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Configuration;
@@ -69,41 +70,9 @@ builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
 var app = builder.Build();
 
-// Security Headers Middleware: Positioned at the beginning of the pipeline to guarantee headers on all responses (redirects, static files, error pages)
-app.Use(async (context, next) =>
-{
-    const string cspPolicy =
-        "default-src 'self'; " +
-        "script-src 'self' 'unsafe-inline'; " +
-        "style-src 'self' 'unsafe-inline'; " +
-        "img-src 'self' data:; " +
-        "font-src 'self' data:; " +
-        "connect-src 'self'; " +
-        "object-src 'none'; " +
-        "frame-ancestors 'none'; " +
-        "form-action 'self' https://login.microsoftonline.com; " +
-        "base-uri 'self';";
-
-    var headers = context.Response.Headers;
-    headers["X-Frame-Options"] = "DENY";
-    headers["X-XSS-Protection"] = "1; mode=block";
-    headers["X-Content-Type-Options"] = "nosniff";
-    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-    headers["Content-Security-Policy"] = cspPolicy;
-
-    context.Response.OnStarting(() =>
-    {
-        var h = context.Response.Headers;
-        if (!h.ContainsKey("X-Frame-Options")) h["X-Frame-Options"] = "DENY";
-        if (!h.ContainsKey("X-XSS-Protection")) h["X-XSS-Protection"] = "1; mode=block";
-        if (!h.ContainsKey("X-Content-Type-Options")) h["X-Content-Type-Options"] = "nosniff";
-        if (!h.ContainsKey("Referrer-Policy")) h["Referrer-Policy"] = "strict-origin-when-cross-origin";
-        if (!h.ContainsKey("Content-Security-Policy")) h["Content-Security-Policy"] = cspPolicy;
-        return Task.CompletedTask;
-    });
-
-    await next();
-});
+// Security Headers Middleware: Positioned at the beginning of the pipeline to guarantee headers on all responses (redirects, static files, error pages).
+// Emits a strict nonce-based Content-Security-Policy (no 'unsafe-inline' / 'unsafe-eval' / wildcard sources).
+app.UseMiddleware<CspHeaderMiddleware>();
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
@@ -132,6 +101,9 @@ app.UseStatusCodePages(async context => {
 });
 
 app.UseStaticFiles();
+
+// Moves inline style="..." attributes into a nonce-protected <style> block (after static files so assets are never buffered)
+app.UseMiddleware<CspStyleRewriteMiddleware>();
 
 app.UseRouting();
 
