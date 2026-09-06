@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 //using DocumentFormat.OpenXml.Drawing;
 using DocumentFormat.OpenXml.EMMA;
 using Fingers10.ExcelExport.ActionResults;
@@ -99,6 +99,11 @@ namespace JobAppHR.Controllers
 
         public ActionResult ViewApplicantData(string applicationCode)
         {
+            if (string.IsNullOrWhiteSpace(applicationCode))
+            {
+                return NotFound();
+            }
+
             ApplicationData applicationData;
             applicationData = new ApplicationData();
             applicationData.DocumentNames = new DocumentName();
@@ -108,6 +113,11 @@ namespace JobAppHR.Controllers
             DataTable tmpTable = _DBOperations.SelectRows("Application", fieldList, "ApplicationCode", applicationCode, "");
 
             List<PersonalData> list = _UtilityFn.ConvertToList<PersonalData>(tmpTable);
+
+            if (list == null || list.Count == 0)
+            {
+                return NotFound();
+            }
 
             applicationData.PersonalData = list[0];
 
@@ -126,7 +136,7 @@ namespace JobAppHR.Controllers
                 List<SEExam> listexam = _UtilityFn.ConvertToList<SEExam>(tmpTable);
                 if (listexam.Count > 0)
                     applicationData.OLExam1 = listexam[0];
-                applicationData.DocumentNames.OLExam_Attempt1 = tmpTable.Rows[0]["AttachmentName"].ToString();
+                applicationData.DocumentNames.OLExam_Attempt1 = tmpTable.Rows[0]["AttachmentName"]?.ToString() ?? "";
             }
 
             //2nd attempt

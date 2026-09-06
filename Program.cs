@@ -69,6 +69,42 @@ builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
 var app = builder.Build();
 
+// Security Headers Middleware: Positioned at the beginning of the pipeline to guarantee headers on all responses (redirects, static files, error pages)
+app.Use(async (context, next) =>
+{
+    const string cspPolicy =
+        "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data:; " +
+        "font-src 'self' data:; " +
+        "connect-src 'self'; " +
+        "object-src 'none'; " +
+        "frame-ancestors 'none'; " +
+        "form-action 'self' https://login.microsoftonline.com; " +
+        "base-uri 'self';";
+
+    var headers = context.Response.Headers;
+    headers["X-Frame-Options"] = "DENY";
+    headers["X-XSS-Protection"] = "1; mode=block";
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    headers["Content-Security-Policy"] = cspPolicy;
+
+    context.Response.OnStarting(() =>
+    {
+        var h = context.Response.Headers;
+        if (!h.ContainsKey("X-Frame-Options")) h["X-Frame-Options"] = "DENY";
+        if (!h.ContainsKey("X-XSS-Protection")) h["X-XSS-Protection"] = "1; mode=block";
+        if (!h.ContainsKey("X-Content-Type-Options")) h["X-Content-Type-Options"] = "nosniff";
+        if (!h.ContainsKey("Referrer-Policy")) h["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        if (!h.ContainsKey("Content-Security-Policy")) h["Content-Security-Policy"] = cspPolicy;
+        return Task.CompletedTask;
+    });
+
+    await next();
+});
+
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
@@ -87,33 +123,6 @@ StaticData.UploadPath = app.Configuration["Application:UploadPath"];
 StaticData.FastAPIUrl = app.Configuration["URL:FastAPIUrl"];
 
 app.UseHttpsRedirection();
-
-// Security Headers Middleware: Attached via OnStarting to guarantee execution across all responses (including 302 redirects & errors)
-app.Use(async (context, next) =>
-{
-    context.Response.OnStarting(() =>
-    {
-        var headers = context.Response.Headers;
-        headers["X-Frame-Options"] = "DENY";
-        headers["X-XSS-Protection"] = "1; mode=block";
-        headers["X-Content-Type-Options"] = "nosniff";
-        headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-        headers["Content-Security-Policy"] =
-            "default-src 'self'; " +
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-            "style-src 'self' 'unsafe-inline'; " +
-            "img-src 'self' data: https:; " +
-            "font-src 'self' data:; " +
-            "connect-src 'self' wss: ws:; " +
-            "object-src 'none'; " +
-            "frame-ancestors 'none'; " +
-            "form-action 'self' https://login.microsoftonline.com; " +
-            "base-uri 'self';";
-        return Task.CompletedTask;
-    });
-
-    await next();
-});
 
 app.UseStatusCodePages(async context => {
     if (context.HttpContext.Response.StatusCode == 404)
