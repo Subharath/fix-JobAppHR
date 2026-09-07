@@ -290,53 +290,66 @@ namespace JobAppHR.Controllers
             return View(applicationData);
         }
 
-        public FileResult? ViewDocument(string documentName, string applicationCode)
+        public IActionResult ViewDocument(string documentName, string applicationCode)
         {
-            string folderName = applicationCode.Replace('/', '_');
-            string path = Path.Combine(StaticData.UploadPath, folderName);
-            string docType = "";
-
-            DirectoryInfo directoryInfo = new DirectoryInfo(path);
-            if (directoryInfo.Exists)
+            // Step 1: Reject empty inputs
+            if (string.IsNullOrWhiteSpace(documentName) || string.IsNullOrWhiteSpace(applicationCode))
             {
-                FileInfo[] fileInfo = directoryInfo.GetFiles(documentName + ".*");
-
-                if (fileInfo.Length > 0 && fileInfo[0] != null)
-                {
-                    string fileExtension = Path.GetExtension(fileInfo[0].FullName);
-                    fileExtension = fileExtension.ToLower();
-
-                    if (fileExtension.EndsWith(".pdf"))
-                    {
-                        docType = "application/pdf";
-                    }
-                    else if (fileExtension.EndsWith(".jpg") || fileExtension.EndsWith(".jpeg"))
-                    {
-                        docType = "image/jpeg";
-                    }
-                    else if (fileExtension.EndsWith(".png"))
-                    {
-                        docType = "image/png";
-                    }
-                    else
-                    {
-                        docType = "application/octet-stream";
-                    }
-
-                    path = Path.Combine(path, fileInfo[0].Name);
-                    byte[] bytes;
-                    using (var stream = new MemoryStream())
-                    {
-                        bytes = System.IO.File.ReadAllBytes(path);
-                    }
-
-                    return File(bytes, docType);
-                }
-                else
-                    return null;
+                return NotFound();
             }
-            else
-                return null;
+
+            // Step 2: Prevent Folder Traversal
+            // Replace both '/' and '\' with '_' so an attacker cannot use "../" or "..\" to escape
+            string safeFolder = applicationCode.Replace('/', '_').Replace('\\', '_').Trim();
+            string folderPath = Path.Combine(StaticData.UploadPath, safeFolder);
+
+            // Canonical check: Ensure the folder is truly inside the configured upload directory
+            string fullFolderPath = Path.GetFullPath(folderPath);
+            string fullUploadRoot = Path.GetFullPath(StaticData.UploadPath);
+            if (!fullFolderPath.StartsWith(fullUploadRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return NotFound(); // Traversal attempt blocked!
+            }
+
+            if (!Directory.Exists(fullFolderPath))
+            {
+                return NotFound();
+            }
+
+            // Step 3: Prevent File Traversal & Wildcard Injection
+            // Path.GetFileName strips any path characters from the document name
+            string safeDocName = Path.GetFileName(documentName).Trim();
+            if (string.IsNullOrEmpty(safeDocName) || safeDocName.Contains('*') || safeDocName.Contains('?'))
+            {
+                return NotFound(); // Wildcards or invalid names blocked!
+            }
+
+            // Step 4: Check only allowed file extensions (.pdf, .jpg, .jpeg, .png)
+            // Instead of unsafe wildcard searches, we check for exact files
+            string[] allowedExtensions = { ".pdf", ".jpg", ".jpeg", ".png" };
+            string? foundFilePath = null;
+            string docType = "application/octet-stream";
+
+            foreach (string ext in allowedExtensions)
+            {
+                string testPath = Path.Combine(fullFolderPath, safeDocName + ext);
+                if (System.IO.File.Exists(testPath))
+                {
+                    foundFilePath = testPath;
+                    if (ext == ".pdf") docType = "application/pdf";
+                    else if (ext == ".png") docType = "image/png";
+                    else if (ext == ".jpg" || ext == ".jpeg") docType = "image/jpeg";
+                    break;
+                }
+            }
+
+            if (foundFilePath == null)
+            {
+                return NotFound();
+            }
+
+            byte[] bytes = System.IO.File.ReadAllBytes(foundFilePath);
+            return File(bytes, docType);
         }
 
         public IActionResult ExportToExcel(string intakeCode, string currentStage, int? freezeNo = 0, bool showAll = false, string currentStatus = "PASS")
