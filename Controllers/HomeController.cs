@@ -18,12 +18,14 @@ namespace JobAppHR.Controllers
         private readonly ILogger<HomeController> _logger;
         private readonly IDBOperations _DBOperations;
         private readonly IUtilityFn _UtilityFn;
+        private readonly IConfiguration _configuration;
 
-        public HomeController(ILogger<HomeController> logger, IDBOperations dbOperations, IUtilityFn utilityFn)
+        public HomeController(ILogger<HomeController> logger, IDBOperations dbOperations, IUtilityFn utilityFn, IConfiguration configuration)
         {
             _logger = logger;
             _DBOperations = dbOperations;
             _UtilityFn = utilityFn;
+            _configuration = configuration;
         }
 
         [Authorize(Policy = "NormalUserPolicy")]
@@ -42,129 +44,149 @@ namespace JobAppHR.Controllers
 
         public RedirectResult AzureLogin()
         {
-            string tenantID = "";
+            // Security: Retrieve OAuth credentials from configuration instead of hard-coding in source (CWE-798)
+            string tenantId = _configuration["Authentication:AzureAd:TenantId"] ?? "";
+            string clientId = _configuration["Authentication:AzureAd:ClientId"] ?? "";
             string redirectUri = StaticData.BaseUrl + "/Home/UAzure";
-            string clientID = "";
-            string scope = "openid profile offline_access user.read";
+            string scope = _configuration["Authentication:AzureAd:Scope"] ?? "openid profile offline_access user.read";
             string responseMode = "query";
 
-            string redirectUrl = "https://login.microsoftonline.com/" + tenantID + "/oauth2/v2.0/authorize?response_type=code&client_id=" + clientID + "&redirect_uri=" + redirectUri + "&scope=" + scope + "&response_mode=" + responseMode + "&state=987qaz";
+            // OAuth Best Practice (RFC 6749 Section 10.12): Cryptographically secure random state to protect against CSRF
+            byte[] stateBytes = new byte[32];
+            using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(stateBytes);
+            }
+            string state = Convert.ToBase64String(stateBytes).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+            HttpContext.Session.SetString("OAuth_State", state);
+
+            string redirectUrl = $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/authorize?response_type=code&client_id={Uri.EscapeDataString(clientId)}&redirect_uri={Uri.EscapeDataString(redirectUri)}&scope={Uri.EscapeDataString(scope)}&response_mode={responseMode}&state={Uri.EscapeDataString(state)}";
             return Redirect(redirectUrl);
         }
 
-        //public async Task<ActionResult> UAzure(AuthModel urlDetails)
-        public async Task<ActionResult> UAzure(string code)
+        // OAuth 2.0 / OpenID Connect callback endpoint
+        public async Task<ActionResult> UAzure(string code, string? state = null)
         {
-            //string code = urlDetails.code;
-            //string code = "";
             try
             {
-                string clientId = "";
-                string clientSecret = "";
-                string tenantId = "";
-                string redirectUri = StaticData.BaseUrl + "/Home/UAzure"; //"https://localhost:7161/Home/UAzure";
-                string baseUrl = $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token";
+                // OAuth Best Practice: Validate state parameter to mitigate CSRF attacks (RFC 6749 Section 10.12)
+                string? expectedState = HttpContext.Session.GetString("OAuth_State");
+                HttpContext.Session.Remove("OAuth_State"); // Enforce single-use state token
 
-                HttpClient httpClient = new HttpClient();
-                httpClient.BaseAddress = new Uri(baseUrl);
-
-                // Construct the request parameters
-                var postData = new List<KeyValuePair<string, string>>
+                if (string.IsNullOrEmpty(state) || string.IsNullOrEmpty(expectedState) || state != expectedState)
                 {
-                    new KeyValuePair<string, string>("client_id", clientId),
-                    new KeyValuePair<string, string>("client_secret", clientSecret),
-                    new KeyValuePair<string, string>("code", code), // Assuming the 'Code' property contains the authorization code
-                    new KeyValuePair<string, string>("redirect_uri", redirectUri),
-                    new KeyValuePair<string, string>("grant_type", "authorization_code")
-                };
+                    _logger.LogWarning("OAuth state validation failed in UAzure callback. Potential CSRF attempt.");
+                    return BadRequest("OAuth state validation failed. Possible CSRF attack detected.");
+                }
 
-                // Request access token
-                HttpResponseMessage tokenResponse = await httpClient.PostAsync("", new FormUrlEncodedContent(postData));
-
-                if (tokenResponse.IsSuccessStatusCode)
+                if (string.IsNullOrWhiteSpace(code))
                 {
-                    // Read and parse token response
-                    string tokenResponseContent = await tokenResponse.Content.ReadAsStringAsync();
-                    dynamic tokenJson = JObject.Parse(tokenResponseContent);
-                    string accessToken = tokenJson.access_token;
+                    return BadRequest("Authorization code is missing from response.");
+                }
 
-                    // Use access token to retrieve user details
-                    string graphApiEndpoint = "https://graph.microsoft.com/v1.0/me";
-                    httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-                    HttpResponseMessage userResponse = await httpClient.GetAsync(graphApiEndpoint);
+                // Security: Load OAuth client credentials from configuration
+                string clientId = _configuration["Authentication:AzureAd:ClientId"] ?? "";
+                string clientSecret = _configuration["Authentication:AzureAd:ClientSecret"] ?? "";
+                string tenantId = _configuration["Authentication:AzureAd:TenantId"] ?? "";
+                string redirectUri = StaticData.BaseUrl + "/Home/UAzure";
+                string tokenEndpoint = $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token";
 
-                    if (userResponse.IsSuccessStatusCode)
+                using (HttpClient httpClient = new HttpClient())
+                {
+                    // Construct the OAuth 2.0 authorization_code grant request
+                    var postData = new List<KeyValuePair<string, string>>
                     {
-                        // Read and parse user details
-                        string userResponseContent = await userResponse.Content.ReadAsStringAsync();
-                        dynamic userJson = JObject.Parse(userResponseContent);
+                        new KeyValuePair<string, string>("client_id", clientId),
+                        new KeyValuePair<string, string>("client_secret", clientSecret),
+                        new KeyValuePair<string, string>("code", code),
+                        new KeyValuePair<string, string>("redirect_uri", redirectUri),
+                        new KeyValuePair<string, string>("grant_type", "authorization_code")
+                    };
 
-                        // Access user details here
-                        string userEmail = userJson.mail;
-                        string userName = userJson.displayName;
-                        string userId = userJson.userPrincipalName;
-                        string userGroup = "";
-                        string userRole = "";
+                    // Request access token
+                    HttpResponseMessage tokenResponse = await httpClient.PostAsync(tokenEndpoint, new FormUrlEncodedContent(postData));
 
-                        userId = userId.Substring(0, 6);
-                        HttpContext.Session.SetString("UserName", userName);
-                        HttpContext.Session.SetString("UserId", userId);
-                        
-                        //get the user group
-                        string sql = "SELECT UserGroup, UserEmail FROM Users WHERE UserId = '" + userId + "' AND ActiveStatus = 'ACTIVE'";
-                        DataTable dataTable = _DBOperations.SelectRows(sql);
+                    if (tokenResponse.IsSuccessStatusCode)
+                    {
+                        // Read and parse token response
+                        string tokenResponseContent = await tokenResponse.Content.ReadAsStringAsync();
+                        dynamic tokenJson = JObject.Parse(tokenResponseContent);
+                        string accessToken = tokenJson.access_token;
 
-                        if (dataTable.Rows.Count > 0)
+                        // Use access token to retrieve user identity details via Microsoft Graph API (OIDC UserInfo)
+                        string graphApiEndpoint = "https://graph.microsoft.com/v1.0/me";
+                        using (HttpClient graphClient = new HttpClient())
                         {
-                            userGroup = dataTable.Rows[0]["UserGroup"].ToString();
+                            graphClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                            HttpResponseMessage userResponse = await graphClient.GetAsync(graphApiEndpoint);
 
-                            if (userGroup == "0" || userGroup == "1")
+                            if (userResponse.IsSuccessStatusCode)
                             {
-                                userRole = "Admin";
+                                // Read and parse user details
+                                string userResponseContent = await userResponse.Content.ReadAsStringAsync();
+                                dynamic userJson = JObject.Parse(userResponseContent);
+
+                                string userEmail = (string)(userJson.mail ?? userJson.userPrincipalName);
+                                string userName = (string)userJson.displayName;
+                                string userId = (string)userJson.userPrincipalName;
+                                string userGroup = "";
+                                string userRole = "Normal";
+
+                                if (!string.IsNullOrEmpty(userId) && userId.Length >= 6)
+                                {
+                                    userId = userId.Substring(0, 6);
+                                }
+
+                                HttpContext.Session.SetString("UserName", userName ?? "User");
+                                HttpContext.Session.SetString("UserId", userId ?? "");
+
+                                // get the user group (SQL injection safe lookup)
+                                string safeUserId = (userId ?? "").Replace("'", "''");
+                                string sql = "SELECT UserGroup, UserEmail FROM Users WHERE UserId = '" + safeUserId + "' AND ActiveStatus = 'ACTIVE'";
+                                DataTable dataTable = _DBOperations.SelectRows(sql);
+
+                                if (dataTable.Rows.Count > 0)
+                                {
+                                    userGroup = dataTable.Rows[0]["UserGroup"].ToString() ?? "";
+                                    if (userGroup == "0" || userGroup == "1")
+                                    {
+                                        userRole = "Admin";
+                                    }
+                                }
+
+                                var claims = new List<Claim>
+                                {
+                                    new Claim("UserRole", userRole),
+                                    new Claim("UserId", userId ?? ""),
+                                    new Claim("UserName", userName ?? "User"),
+                                    new Claim("UserEmail", userEmail ?? ""),
+                                    new Claim("UserGroup", userGroup),
+                                };
+
+                                var claimsIdentity = new ClaimsIdentity(
+                                    claims, CookieAuthenticationDefaults.AuthenticationScheme);
+
+                                await HttpContext.SignInAsync(
+                                    CookieAuthenticationDefaults.AuthenticationScheme,
+                                    new ClaimsPrincipal(claimsIdentity));
+
+                                return View("Home");
                             }
                             else
                             {
-                                userRole = "Normal";
+                                return StatusCode((int)userResponse.StatusCode);
                             }
                         }
-
-                        var claims = new List<Claim>
-                        {
-                            new Claim("UserRole", userRole),
-                            new Claim("UserId", userId),
-                            new Claim("UserName", userName),
-                            new Claim("UserEmail", userEmail),
-                            new Claim("UserGroup", userGroup),
-                        };
-
-                        var claimsIdentity = new ClaimsIdentity(
-                            claims, CookieAuthenticationDefaults.AuthenticationScheme);
-
-                        await HttpContext.SignInAsync(
-                            CookieAuthenticationDefaults.AuthenticationScheme,
-                            new ClaimsPrincipal(claimsIdentity));
-
-                        return View("Home");
                     }
                     else
                     {
-                        // Handle user details retrieval failure
-                        // Log the error or return an appropriate response
-                        return StatusCode((int)userResponse.StatusCode);
+                        return StatusCode((int)tokenResponse.StatusCode);
                     }
-                }
-                else
-                {
-                    // Handle access token retrieval failure
-                    // Log the error or return an appropriate response
-                    return StatusCode((int)tokenResponse.StatusCode);
                 }
             }
             catch (Exception ex)
             {
-
-                // Handle any exceptions
-                // Log the exception or return an appropriate response
+                _logger.LogError(ex, "Exception during UAzure OAuth callback");
                 return StatusCode(500);
             }
         }
@@ -189,9 +211,7 @@ namespace JobAppHR.Controllers
         public IActionResult DevLogin(string? returnUrl)
         {
             // Only allow dev login when fallback is enabled
-            var enableDevFallback = HttpContext.RequestServices
-                .GetRequiredService<IConfiguration>()
-                .GetValue<bool>("Authentication:EnableDevUserFallback");
+            var enableDevFallback = _configuration.GetValue<bool>("Authentication:EnableDevUserFallback");
 
             if (!enableDevFallback)
                 return RedirectToAction("AzureLogin");
@@ -208,9 +228,7 @@ namespace JobAppHR.Controllers
         [HttpPost]
         public async Task<IActionResult> DevLogin(string userId, string? returnUrl)
         {
-            var enableDevFallback = HttpContext.RequestServices
-                .GetRequiredService<IConfiguration>()
-                .GetValue<bool>("Authentication:EnableDevUserFallback");
+            var enableDevFallback = _configuration.GetValue<bool>("Authentication:EnableDevUserFallback");
 
             if (!enableDevFallback)
                 return RedirectToAction("AzureLogin");
