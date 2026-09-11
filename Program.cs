@@ -10,7 +10,7 @@ using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var enableDevUserFallback = builder.Configuration.GetValue<bool>("Authentication:EnableDevUserFallback");
+var enableDevUserFallback = builder.Environment.IsDevelopment() && builder.Configuration.GetValue<bool>("Authentication:EnableDevUserFallback");
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
@@ -23,7 +23,7 @@ builder.Services.AddDistributedMemoryCache();
 builder.Services.AddSession(options =>
 {
     options.Cookie.IsEssential = true;
-    options.IdleTimeout = TimeSpan.FromSeconds(60);
+    options.IdleTimeout = TimeSpan.FromMinutes(10);
 });
 
 builder.Services.Configure<FormOptions>(x => x.ValueCountLimit = 10000);

@@ -1,8 +1,10 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using System.Collections.Concurrent;
 
 namespace JobAppHR.Hubs
 {
+    [Authorize(Policy = "NormalUserPolicy")]
     public class ScreeningHub : Hub
     {
         // Track which rows are locked by which connection
@@ -61,6 +63,8 @@ namespace JobAppHR.Hubs
             string applicationCode, string newStatus, string newRemarks, string userId, string userName)
         {
             var groupName = BuildGroupName(intakeCode, stage, status);
+            userId = GetUserId();
+            userName = GetUserName();
 
             // Broadcast to all OTHER clients in the group
             await Clients.OthersInGroup(groupName).SendAsync("ReceiveStatusUpdate",
