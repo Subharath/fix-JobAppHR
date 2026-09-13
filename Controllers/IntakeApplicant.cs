@@ -394,7 +394,9 @@ namespace JobAppHR.Controllers
                 subjectName = row["SubjectName"].ToString();
                 examCode = row["ExamCode"].ToString();
 
-                DataRow[] drs = subjectTable.Select("SubjectName = '" + subjectName + "'");
+                DataRow[] drs = subjectTable.AsEnumerable()
+                    .Where(r => string.Equals(r.Field<string>("SubjectName"), subjectName, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
 
                 if (drs.Length > 0)
                 {
