@@ -153,6 +153,7 @@ namespace JobAppHR.Controllers
         }
 
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> UpdateAgeFilter(IFormCollection formCollection)
         {
             string userId = "";
@@ -272,6 +273,7 @@ namespace JobAppHR.Controllers
         }
 
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> UpdateALFilter(IFormCollection formCollection)
         {
             string userId = "";
@@ -357,6 +359,7 @@ namespace JobAppHR.Controllers
         }
 
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public IActionResult UpdateOLFilter(IFormCollection formCollection)
         {
             string userId = "";
@@ -447,6 +450,7 @@ namespace JobAppHR.Controllers
         }
 
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public IActionResult UpdateHEPQFilter(IFormCollection formCollection)
         {
             string userId = "";
@@ -505,6 +509,7 @@ namespace JobAppHR.Controllers
         }
 
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public IActionResult UpdateFinal(IFormCollection formCollection)
         {
             string userId = "";
@@ -575,6 +580,7 @@ namespace JobAppHR.Controllers
         //but AdjustFinal takes records which are previously updated as PASS for final stage
         //so in AdjustFinal when and only if status is set to FAIL we need to update them again
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public IActionResult AdjustFinal(IFormCollection formCollection)
         {
             string userId = "";
@@ -641,6 +647,7 @@ namespace JobAppHR.Controllers
         //so in UpdateFail when and only if status is set to PASS we need to update them again
         //but later they wanted to update just the remarks saying something like "need to check further"
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public IActionResult UpdateFail(IFormCollection formCollection)
         {
             string userId = "";

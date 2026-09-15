@@ -4,14 +4,20 @@ using Microsoft.Data.SqlClient;
 using System.Data;
 using System.Data.Common;
 using System.Security.Principal;
+using Microsoft.Extensions.Logging;
 
 namespace JobAppHR.Repository
 {
     public class DBOperations : IDBOperations
     {
-        private readonly DBConnection _dbConnection = new();
+         private readonly ILogger<DBOperations>? _logger;
+
+        public DBOperations(ILogger<DBOperations>? logger = null)
+        {
+            _logger = logger;
+        }
         
-        public DataTable SelectRows(string tableName, string fieldSet, string keyField, string keyValue, string whereClause, string keyFieldDataType)
+        public DataTable SelectRows(string tableName, string fieldSet, string keyField, string keyValue, string whereClause, string keyFieldDataType = "", params SqlParameter[] parameters)
         {
             DataTable dtblResult = new DataTable();
             using SqlConnection con = _dbConnection.GetDbConnection();
@@ -21,16 +27,33 @@ namespace JobAppHR.Repository
                 con.Open();
                 sqlCmd.Connection = con;
 
-                if (whereClause == string.Empty && keyField != string.Empty && keyValue != string.Empty)
-                    if (keyFieldDataType == "")
-                        whereClause = "WHERE " + keyField + " = '" + keyValue + "'";
+                if (string.IsNullOrEmpty(whereClause) && !string.IsNullOrEmpty(keyField) && !string.IsNullOrEmpty(keyValue))
+                {
+                    string paramName = "@" + keyField.Replace(".", "_").Replace(" ", "");
+                    whereClause = "WHERE " + keyField + " = " + paramName;
+
+                    if (!string.IsNullOrEmpty(keyFieldDataType) && (keyFieldDataType.Equals("int", StringComparison.OrdinalIgnoreCase) || keyFieldDataType.Equals("integer", StringComparison.OrdinalIgnoreCase)) && int.TryParse(keyValue, out int intVal))
+                    {
+                        sqlCmd.Parameters.Add(new SqlParameter(paramName, SqlDbType.Int) { Value = intVal });
+                    }
+                    else if (!string.IsNullOrEmpty(keyFieldDataType) && decimal.TryParse(keyValue, out decimal decVal))
+                    {
+                        sqlCmd.Parameters.Add(new SqlParameter(paramName, SqlDbType.Decimal) { Value = decVal });
+                    }
                     else
-                        whereClause = "WHERE " + keyField + " = " + keyValue;
+                    {
+                        sqlCmd.Parameters.Add(new SqlParameter(paramName, SqlDbType.VarChar) { Value = keyValue });
+                    }
+                }
 
-                if (whereClause != string.Empty && !whereClause.Trim().ToUpper().StartsWith("WHERE"))
-                    whereClause = "WHERE " + whereClause;
+                if (!string.IsNullOrEmpty(whereClause) && !whereClause.Trim().ToUpper().StartsWith("WHERE"))
 
-                sqlCmd.CommandText = "SELECT " + fieldSet + " FROM " + tableName + " " + whereClause;
+                 if (parameters != null && parameters.Length > 0)
+                {
+                    sqlCmd.Parameters.AddRange(parameters);
+                }
+
+                sqlCmd.CommandText = "SELECT " + fieldSet + " FROM " + tableName + (string.IsNullOrEmpty(whereClause) ? "" : " " + whereClause);
 
                 SqlDataAdapter sqlDa = new SqlDataAdapter(sqlCmd);
 
@@ -43,12 +66,22 @@ namespace JobAppHR.Repository
 
         public DataTable SelectRows(string sql)
         {
+            return SelectRows(sql, Array.Empty<SqlParameter>());
+        }
+
+        public DataTable SelectRows(string sql, params SqlParameter[] parameters)
+        {
             DataTable dtblResult = new DataTable();
             using SqlConnection con = _dbConnection.GetDbConnection();
 
             using SqlCommand sqlCmd = con.CreateCommand();
             {
                 sqlCmd.CommandText = sql;
+
+                if (parameters != null && parameters.Length > 0)
+                {
+                    sqlCmd.Parameters.AddRange(parameters);
+                }
 
                 SqlDataAdapter sqlDa = new SqlDataAdapter(sqlCmd);
 
@@ -178,7 +211,8 @@ namespace JobAppHR.Repository
                     }
                     catch (Exception exc)
                     {
-                        retrunMsg = exc.ToString();
+                        _logger?.LogError(exc, "Error executing UpdateRecords on table {TableName}", tableName);
+                        retrunMsg = "ERROR";
                     }
                 }
             }
@@ -248,7 +282,8 @@ namespace JobAppHR.Repository
                     }
                     catch (Exception exc)
                     {
-                        retrunMsg = exc.ToString();
+                        _logger?.LogError(exc, "Error executing UpdateRecords on table {TableName}", tableName);
+                        retrunMsg = "ERROR";
                     }
                 }
             }
@@ -256,6 +291,11 @@ namespace JobAppHR.Repository
         }
 
         public string UpdateRecords(string sql)
+        {
+            return UpdateRecords(sql, Array.Empty<SqlParameter>());
+        }
+
+        public string UpdateRecords(string sql, params SqlParameter[] parameters)
         {
             string retrunMsg = "";
 
@@ -267,6 +307,11 @@ namespace JobAppHR.Repository
                 sqlCmd.CommandType = CommandType.Text;
                 sqlCmd.CommandText = sql;
 
+                if (parameters != null && parameters.Length > 0)
+                {
+                    sqlCmd.Parameters.AddRange(parameters);
+                }
+
                 try
                 {
                     if (sqlCmd.ExecuteNonQuery() > 0)
@@ -275,6 +320,8 @@ namespace JobAppHR.Repository
                 catch (Exception exc)
                 {
                     retrunMsg = exc.ToString();
+                    _logger?.LogError(exc, "Error executing UpdateRecords SQL command");
+                    retrunMsg = "ERROR";
                 }
             }
             return retrunMsg;
@@ -351,7 +398,8 @@ namespace JobAppHR.Repository
                     }
                     catch (Exception exc)
                     {
-                        retrunMsg = exc.Message;
+                       _logger?.LogError(exc, "Error executing InsertRecords on table {TableName}", tableName);
+                        retrunMsg = "ERROR";
                     }
                 }
             }
@@ -362,8 +410,8 @@ namespace JobAppHR.Repository
         public string GetJobPositionCodeById(int jobPositionId)
         {
             string jobPositionCode = string.Empty;
-            string sql = "SELECT JobPositionCode FROM JobPosition WHERE JobPositionID = " + jobPositionId;
-            DataTable dataTable = SelectRows(sql);
+            string sql = "SELECT JobPositionCode FROM JobPosition WHERE JobPositionID = @JobPositionID";
+            DataTable dataTable = SelectRows(sql, new SqlParameter("@JobPositionID", SqlDbType.Int) { Value = jobPositionId });
 
             if (dataTable.Rows.Count > 0)
                 jobPositionCode = dataTable.Rows[0][0].ToString();
@@ -374,13 +422,18 @@ namespace JobAppHR.Repository
         public string GetJobPositionName(string? intakeCode = "", string? jobPositionCode = "")
         {
             string jobPositionName = string.Empty;
-            string sql = string.Empty;
-            if (! string.IsNullOrEmpty(intakeCode))
-                sql = "SELECT JobPositionName FROM JobPosition INNER JOIN Intake ON Intake.JobPositionID = JobPosition.JobPositionID WHERE IntakeCode = '" + intakeCode + "'";
-            else if (! string.IsNullOrEmpty(jobPositionCode))
-                sql = "SELECT JobPositionName FROM JobPosition WHERE JobPositionCode = '" + jobPositionCode + "'";
+             DataTable dataTable = new DataTable();
+            if (!string.IsNullOrEmpty(intakeCode))
+            {
+                string sql = "SELECT JobPositionName FROM JobPosition INNER JOIN Intake ON Intake.JobPositionID = JobPosition.JobPositionID WHERE IntakeCode = @IntakeCode";
+                dataTable = SelectRows(sql, new SqlParameter("@IntakeCode", SqlDbType.VarChar) { Value = intakeCode });
+            }
+            else if (!string.IsNullOrEmpty(jobPositionCode))
+            {
+                string sql = "SELECT JobPositionName FROM JobPosition WHERE JobPositionCode = @JobPositionCode";
+                dataTable = SelectRows(sql, new SqlParameter("@JobPositionCode", SqlDbType.VarChar) { Value = jobPositionCode });
+            }
 
-            DataTable dataTable = SelectRows(sql);
 
             if (dataTable.Rows.Count > 0)
                 jobPositionName = dataTable.Rows[0][0].ToString();
@@ -391,8 +444,8 @@ namespace JobAppHR.Repository
         public DataTable GetFilteringCriteriaOfJobPosition(string intakeCode)
         {
             //string sql = "SELECT B.JobPositionCode, B.ALRequired, B.OLRequired  FROM Intake A INNER JOIN JobPosition B ON A.JobPositionID = B.JobPositionID WHERE A.IntakeCode = '" + intakeCode + "'";
-            string sql = "SELECT IntakeCode, ALRequired, OLRequired FROM Intake WHERE IntakeCode = '" + intakeCode + "'";
-            DataTable dataTable = SelectRows(sql);
+            string sql = "SELECT IntakeCode, ALRequired, OLRequired FROM Intake WHERE IntakeCode = @IntakeCode";
+            DataTable dataTable = SelectRows(sql, new SqlParameter("@IntakeCode", SqlDbType.VarChar) { Value = intakeCode });
 
             return dataTable;
         }

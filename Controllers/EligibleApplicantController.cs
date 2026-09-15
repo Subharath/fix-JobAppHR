@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using System.Data;
+using Microsoft.Data.SqlClient;
 
 namespace JobAppHR.Controllers
 {
@@ -48,8 +49,8 @@ namespace JobAppHR.Controllers
 
         public IActionResult FreezeSummary(string intakeCode)
         {
-            string sql = "SELECT * FROM FreezeSummary WHERE IntakeCode = '" + intakeCode + "' ORDER BY FreezeNo DESC";
-            DataTable tmpTable = _DBOperations.SelectRows(sql);
+            string sql = "SELECT * FROM FreezeSummary WHERE IntakeCode = @IntakeCode ORDER BY FreezeNo DESC";
+            DataTable tmpTable = _DBOperations.SelectRows(sql, new SqlParameter("@IntakeCode", SqlDbType.VarChar) { Value = intakeCode ?? "" });
 
             List<FreezeSummary> list = _UtilityFn.ConvertToList<FreezeSummary>(tmpTable);
 
@@ -100,14 +101,19 @@ namespace JobAppHR.Controllers
         }
 
         [HttpPost]
+        [ValidateAntiForgeryToken]
         [Authorize(Policy = "AdminUserPolicy")]
         public IActionResult ReverseStatus(string applicationCode, string remarks)
         {
             User user = _UtilityFn.GetCurrentUser();
-            string userId = user.UserId;
+            string userId = user != null ? user.UserId : "";
 
-            string sql = "UPDATE FilteredData SET FinalStatus = 'PASS', CurrentStatus = 'PASS', FinalRemarks = FinalRemarks + '," + remarks + "', FinalStatusReversedOn =  getdate(), FinalStatusReversedBy = '" + userId + "' WHERE ApplicationCode = '" + applicationCode + "'";
-            string message = _DBOperations.UpdateRecords(sql);
+            string sql = "UPDATE FilteredData SET FinalStatus = 'PASS', CurrentStatus = 'PASS', FinalRemarks = CASE WHEN FinalRemarks IS NULL OR FinalRemarks = '' THEN @Remarks ELSE FinalRemarks + ',' + @Remarks END, FinalStatusReversedOn = getdate(), FinalStatusReversedBy = @UserId WHERE ApplicationCode = @ApplicationCode";
+            string message = _DBOperations.UpdateRecords(sql,
+                new SqlParameter("@Remarks", SqlDbType.VarChar) { Value = remarks ?? "" },
+                new SqlParameter("@UserId", SqlDbType.VarChar) { Value = userId },
+                new SqlParameter("@ApplicationCode", SqlDbType.VarChar) { Value = applicationCode ?? "" });
+
 
             ViewBag.applicationCode = applicationCode;
             ViewBag.status = message;
@@ -115,7 +121,7 @@ namespace JobAppHR.Controllers
             if (message == "SUCCESS")
                 ViewBag.message = "Record successfully saved."; 
             else
-                ViewBag.message = "Record could not be saved. Please try again. " + message;
+                ViewBag.message = "Record could not be saved. Please try again.";
 
             return View();
         }
@@ -133,10 +139,13 @@ namespace JobAppHR.Controllers
         public IActionResult MakeNotEligible(string applicationCode, string remarks)
         {
             User user = _UtilityFn.GetCurrentUser();
-            string userId = user.UserId;
+            string userId = user != null ? user.UserId : "";
 
-            string sql = "UPDATE FilteredData SET FinalStatus = 'FAIL', CurrentStatus = 'FAIL', FinalRemarks = FinalRemarks + '," + remarks + "', FinalStatusReversedOn =  getdate(), FinalStatusReversedBy = '" + userId + "' WHERE ApplicationCode = '" + applicationCode + "'";
-            string message = _DBOperations.UpdateRecords(sql);
+            string sql = "UPDATE FilteredData SET FinalStatus = 'FAIL', CurrentStatus = 'FAIL', FinalRemarks = CASE WHEN FinalRemarks IS NULL OR FinalRemarks = '' THEN @Remarks ELSE FinalRemarks + ',' + @Remarks END, FinalStatusReversedOn = getdate(), FinalStatusReversedBy = @UserId WHERE ApplicationCode = @ApplicationCode";
+            string message = _DBOperations.UpdateRecords(sql,
+                new SqlParameter("@Remarks", SqlDbType.VarChar) { Value = remarks ?? "" },
+                new SqlParameter("@UserId", SqlDbType.VarChar) { Value = userId },
+                new SqlParameter("@ApplicationCode", SqlDbType.VarChar) { Value = applicationCode ?? "" });
 
             ViewBag.applicationCode = applicationCode;
             ViewBag.status = message;
@@ -144,7 +153,7 @@ namespace JobAppHR.Controllers
             if (message == "SUCCESS")
                 ViewBag.message = "Record successfully saved."; 
             else
-                ViewBag.message = "Record could not be saved. Please try again. " + message;
+                ViewBag.message = "Record could not be saved. Please try again.";
 
             return View();
         }
@@ -153,14 +162,20 @@ namespace JobAppHR.Controllers
         {
             string nextStage = "EXAM"; 
             string sql = "";
+            DataTable tmptbl;
 
             if (freezeNo.HasValue)
             {
-                sql = "SELECT ExamShortListed, InterviewShortListed, JobShortListed FROM FreezeSummary WHERE IntakeCode = '" + intakeCode + "' AND FreezeNo = " + freezeNo;
+               sql = "SELECT ExamShortListed, InterviewShortListed, JobShortListed FROM FreezeSummary WHERE IntakeCode = @IntakeCode AND FreezeNo = @FreezeNo";
+                tmptbl = _DBOperations.SelectRows(sql,
+                    new SqlParameter("@IntakeCode", SqlDbType.VarChar) { Value = intakeCode ?? "" },
+                    new SqlParameter("@FreezeNo", SqlDbType.Int) { Value = freezeNo.Value });
             }
             else
             {
-                sql = "SELECT ExamShortListed, InterviewShortListed, JobShortListed FROM Intake WHERE IntakeCode = '" + intakeCode + "' AND FinalConfirmed = 1";
+                sql = "SELECT ExamShortListed, InterviewShortListed, JobShortListed FROM Intake WHERE IntakeCode = @IntakeCode AND FinalConfirmed = 1";
+                tmptbl = _DBOperations.SelectRows(sql,
+                    new SqlParameter("@IntakeCode", SqlDbType.VarChar) { Value = intakeCode ?? "" });
             }
 
             DataTable tmptbl = _DBOperations.SelectRows(sql);
@@ -198,6 +213,8 @@ namespace JobAppHR.Controllers
             return View(list);
         }
 
+        [HttpPost]
+        [ValidateAntiForgeryToken]
         public IActionResult UpdateShortListed(IFormCollection formCollection)
         {
             string userId = "";
