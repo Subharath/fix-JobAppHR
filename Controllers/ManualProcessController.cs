@@ -120,6 +120,7 @@ namespace JobAppHR.Controllers
         }
 
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public IActionResult UpdateFinal(IFormCollection formCollection)
         {
 
