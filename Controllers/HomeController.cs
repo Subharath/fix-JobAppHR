@@ -271,7 +271,12 @@ namespace JobAppHR.Controllers
             HttpContext.Session.SetString("UserGroup", userGroup);
             HttpContext.Session.SetString("UserRole", userRole);
 
-            return Redirect(returnUrl ?? "/");
+            if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+            {
+                return LocalRedirect(returnUrl);
+            }
+
+            return Redirect("/");
         }
 
         [AllowAnonymous]
