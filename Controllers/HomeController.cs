@@ -226,6 +226,7 @@ namespace JobAppHR.Controllers
 
         [AllowAnonymous]
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> DevLogin(string userId, string? returnUrl)
         {
             var enableDevFallback = _configuration.GetValue<bool>("Authentication:EnableDevUserFallback");
