@@ -211,7 +211,8 @@ namespace JobAppHR.Controllers
         public IActionResult DevLogin(string? returnUrl)
         {
             // Only allow dev login when fallback is enabled
-            var enableDevFallback = _configuration.GetValue<bool>("Authentication:EnableDevUserFallback");
+            var enableDevFallback = HttpContext.RequestServices.GetRequiredService<IWebHostEnvironment>().IsDevelopment() &&
+                _configuration.GetValue<bool>("Authentication:EnableDevUserFallback");
 
             if (!enableDevFallback)
                 return RedirectToAction("AzureLogin");
@@ -229,7 +230,8 @@ namespace JobAppHR.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DevLogin(string userId, string? returnUrl)
         {
-            var enableDevFallback = _configuration.GetValue<bool>("Authentication:EnableDevUserFallback");
+            var enableDevFallback = HttpContext.RequestServices.GetRequiredService<IWebHostEnvironment>().IsDevelopment() &&
+                _configuration.GetValue<bool>("Authentication:EnableDevUserFallback");
 
             if (!enableDevFallback)
                 return RedirectToAction("AzureLogin");
@@ -271,12 +273,7 @@ namespace JobAppHR.Controllers
             HttpContext.Session.SetString("UserGroup", userGroup);
             HttpContext.Session.SetString("UserRole", userRole);
 
-            if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
-            {
-                return LocalRedirect(returnUrl);
-            }
-
-            return Redirect("/");
+            return LocalRedirect(Url.IsLocalUrl(returnUrl) ? returnUrl : "/");
         }
 
         [AllowAnonymous]
